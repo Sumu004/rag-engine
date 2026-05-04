@@ -38,8 +38,8 @@ async def lifespan(app: FastAPI):
     """Startup: load persisted index if available.  Shutdown: save."""
     print("RAG Engine starting...")
     print(f"  Chunker model: {chunker.model}")
-    print(f"  Retriever: hybrid (FAISS + BM25)")
-    print(f"  LLM: GROQ LLaMA-3")
+    print("  Retriever: hybrid (FAISS + BM25)")
+    print("  LLM: GROQ LLaMA-3")
 
     chunker.model.to('cpu')
 
@@ -97,15 +97,15 @@ async def ingest_file(file: UploadFile = File(...)):
     """
     content = await file.read()
     text = content.decode('utf-8', errors='ignore')
-    
+
     file_hash = hashlib.md5(content).hexdigest()[:8]
-    
+
     chunks = chunker.chunk(text)
-    
+
     for chunk in chunks:
         chunk['source_file'] = file.filename
         chunk['file_hash'] = file_hash
-    
+
     retriever.add_documents(chunks)
 
     # Persist to disk so the index survives restarts.
@@ -113,7 +113,7 @@ async def ingest_file(file: UploadFile = File(...)):
         retriever.save(INDEX_PATH)
     except Exception as e:
         print(f"Warning: failed to persist index after ingest: {e}")
-    
+
     return {
         "status": "ingested",
         "filename": file.filename,
@@ -132,7 +132,7 @@ async def query(
 ):
     """
     Query the RAG system.
-    
+
     - question: The question to ask
     - k: Number of chunks to retrieve
     - use_cache: Enable semantic cache (handled by LLMClient)
@@ -140,15 +140,15 @@ async def query(
     """
     if not question.strip():
         raise HTTPException(400, "Question cannot be empty")
-    
+
     mode = classifier.classify(question) if auto_route else 'hybrid'
-    
+
     results = retriever.search(question, k=k, mode=mode)
-    
+
     contexts = [r['text'] for r in results]
-    
+
     llm_response = router.complete(question, contexts, auto_route=auto_route)
-    
+
     response = {
         "question": question,
         "answer": llm_response.content,
@@ -166,7 +166,7 @@ async def query(
         "tokens_used": llm_response.tokens_used,
         "latency_ms": llm_response.latency_ms
     }
-    
+
     return response
 
 

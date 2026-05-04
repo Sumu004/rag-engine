@@ -43,6 +43,7 @@ LLM_MODELS = {
 
 _EMBED_MODEL = None
 
+
 def _get_embed_model() -> SentenceTransformer:
     global _EMBED_MODEL
     if _EMBED_MODEL is None:
