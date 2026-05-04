@@ -93,10 +93,9 @@ def run_question(
     question: str,
     retriever: HybridRetriever,
     router: LLMRouter,
-    classifier: QueryClassifier,
     k: int = 5,
 ) -> Dict:
-    mode = classifier.classify(question)
+    mode = retriever.classify_query(question)
     results = retriever.search(question, k=k, mode=mode)
     contexts = [r["text"] for r in results]
     response = router.complete(question, contexts, auto_route=True)
@@ -178,7 +177,7 @@ def main() -> int:
     print(f"Questions: {len(qa_pairs)}")
 
     print("\nBuilding RAG pipeline...")
-    retriever, router, classifier = build_pipeline(corpus)
+    retriever, router, _ = build_pipeline(corpus)
     stats = retriever.index_stats()
     print(f"Index: {stats['num_docs']} chunks, dim={stats['embedding_dim']}")
 
@@ -186,7 +185,7 @@ def main() -> int:
     records = []
     for i, qa in enumerate(qa_pairs, 1):
         print(f"  [{i:02d}/{len(qa_pairs)}] {qa['question'][:60]}")
-        result = run_question(qa["question"], retriever, router, classifier)
+        result = run_question(qa["question"], retriever, router)
         result["ground_truth"] = qa["ground_truth"]
         records.append(result)
 
