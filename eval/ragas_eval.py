@@ -34,10 +34,13 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 try:
     from datasets import Dataset
     from ragas import evaluate as ragas_evaluate
-    from ragas.metrics.collections import faithfulness, answer_relevancy, context_precision
+    from ragas.metrics import Faithfulness, AnswerRelevancy, ContextPrecision
     RAGAS_AVAILABLE = True
 except ImportError:
     RAGAS_AVAILABLE = False
+
+# Instantiated metric objects populated during LLM config below.
+_ragas_metrics = []
 
 RAGAS_LLM_CONFIGURED = False
 if RAGAS_AVAILABLE and GROQ_API_KEY:
@@ -56,10 +59,12 @@ if RAGAS_AVAILABLE and GROQ_API_KEY:
         # HuggingFace embeddings locally — GROQ does not serve embeddings
         _ragas_embeddings = _RagasHFEmbeddings(model="sentence-transformers/all-MiniLM-L6-v2")
 
-        for metric in (faithfulness, answer_relevancy, context_precision):
-            metric.llm = _ragas_llm
-        # answer_relevancy uses embeddings to score semantic similarity
-        answer_relevancy.embeddings = _ragas_embeddings
+        # New RAGAS API: instantiate metric objects, pass LLM/embeddings in constructor
+        _ragas_metrics = [
+            Faithfulness(llm=_ragas_llm),
+            AnswerRelevancy(llm=_ragas_llm, embeddings=_ragas_embeddings),
+            ContextPrecision(llm=_ragas_llm),
+        ]
 
         RAGAS_LLM_CONFIGURED = True
     except Exception as e:
@@ -119,11 +124,13 @@ def evaluate_with_ragas(records: List[Dict]) -> Dict:
         }
         for r in records
     ])
-    result = ragas_evaluate(ds, metrics=[faithfulness, answer_relevancy, context_precision])
+    result = ragas_evaluate(ds, metrics=_ragas_metrics)
+    # Result keys are the metric's .name attribute (e.g. "faithfulness")
+    scores = dict(result)
     return {
-        "faithfulness": float(result["faithfulness"]),
-        "answer_relevancy": float(result["answer_relevancy"]),
-        "context_precision": float(result["context_precision"]),
+        "faithfulness": float(scores.get("faithfulness", 0.0)),
+        "answer_relevancy": float(scores.get("answer_relevancy", 0.0)),
+        "context_precision": float(scores.get("context_precision", 0.0)),
         "evaluator": "ragas",
     }
 
