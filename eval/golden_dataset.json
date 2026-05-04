@@ -1,0 +1,146 @@
+{
+  "corpus": [
+    {
+      "id": "doc_python",
+      "text": "Python is a high-level, interpreted programming language created by Guido van Rossum and first released in 1991. It emphasises code readability and supports multiple programming paradigms including object-oriented, functional, and procedural styles. Python has a large standard library and a rich ecosystem of third-party packages managed via pip. It is widely used in web development, data science, automation, and artificial intelligence."
+    },
+    {
+      "id": "doc_ml",
+      "text": "Machine learning is a subfield of artificial intelligence in which systems learn patterns from data without being explicitly programmed. Supervised learning trains models on labelled examples; unsupervised learning finds structure in unlabelled data; reinforcement learning trains agents via reward signals. Deep learning is a subset of machine learning that uses neural networks with many layers to learn hierarchical representations. Neural networks are loosely inspired by the structure of the human brain and consist of interconnected nodes organised in layers."
+    },
+    {
+      "id": "doc_retrieval",
+      "text": "FAISS (Facebook AI Similarity Search) is an open-source library developed by Meta for efficient similarity search over dense vector embeddings. It supports exact and approximate nearest neighbour search and scales to billions of vectors. BM25 (Best Match 25) is a probabilistic ranking function used in information retrieval. It extends TF-IDF by adding term-frequency saturation (controlled by parameter k1) and document-length normalisation (controlled by parameter b). BM25 is the standard sparse retrieval baseline and handles exact keyword matches better than dense methods. Reciprocal Rank Fusion (RRF) is a rank fusion algorithm that combines ranked lists from multiple retrieval systems without requiring score normalisation. The RRF score for a document is the sum of 1/(k + rank) across all lists, where k=60 is a smoothing constant from Cormack et al. 2009. RRF is robust when fusing dense and sparse retrieval because it treats rank positions rather than raw scores."
+    },
+    {
+      "id": "doc_rag",
+      "text": "Retrieval-Augmented Generation (RAG) is an architecture that combines a retrieval system with a large language model. A user query is used to retrieve relevant document chunks from an index; the retrieved chunks are injected into the LLM prompt as context, grounding the model's response in the retrieved evidence. Chunking is the process of splitting documents into smaller pieces before indexing. Semantic chunking splits on drops in cosine similarity between adjacent sentence embeddings rather than fixed token counts, preserving topical boundaries. Embedding vectors are dense numerical representations of text produced by encoder models such as sentence-transformers. Cosine similarity measures the angle between two vectors and is the standard metric for comparing embeddings because it is invariant to vector magnitude."
+    },
+    {
+      "id": "doc_systems",
+      "text": "A vector database is a specialised database designed to store and query embedding vectors efficiently. Examples include Pinecone, Weaviate, Qdrant, and pgvector (a PostgreSQL extension). Rate limiting controls the rate of requests from a client to protect a service from overload. The token bucket algorithm maintains a bucket of tokens that refills at a fixed rate; each request consumes one token, and requests are rejected when the bucket is empty. Idempotency ensures that performing the same operation multiple times has the same effect as performing it once. In distributed systems, idempotency keys are used to deduplicate retried requests, preventing double-charges or duplicate order creation. Semantic caching stores responses to previous queries and returns a cached response when a new query is sufficiently similar (measured by embedding cosine similarity above a threshold)."
+    }
+  ],
+  "qa_pairs": [
+    {
+      "id": 1,
+      "question": "What is Python?",
+      "ground_truth": "Python is a high-level, interpreted programming language created by Guido van Rossum that emphasises code readability and supports multiple programming paradigms.",
+      "type": "factual"
+    },
+    {
+      "id": 2,
+      "question": "Explain machine learning.",
+      "ground_truth": "Machine learning is a subfield of artificial intelligence in which systems learn patterns from data without being explicitly programmed, encompassing supervised, unsupervised, and reinforcement learning.",
+      "type": "semantic"
+    },
+    {
+      "id": 3,
+      "question": "Define neural networks.",
+      "ground_truth": "Neural networks are computational models loosely inspired by the human brain, consisting of interconnected nodes organised in layers that learn hierarchical representations from data.",
+      "type": "factual"
+    },
+    {
+      "id": 4,
+      "question": "Compare machine learning and deep learning.",
+      "ground_truth": "Machine learning is the broader field of systems that learn from data; deep learning is a subset that uses neural networks with many layers to learn hierarchical representations automatically.",
+      "type": "complex"
+    },
+    {
+      "id": 5,
+      "question": "What is FAISS used for?",
+      "ground_truth": "FAISS is an open-source library by Meta for efficient similarity search over dense vector embeddings, supporting both exact and approximate nearest neighbour search at large scale.",
+      "type": "factual"
+    },
+    {
+      "id": 6,
+      "question": "Explain RAG architecture.",
+      "ground_truth": "RAG (Retrieval-Augmented Generation) combines a retrieval system with an LLM: a query retrieves relevant document chunks, which are injected as context into the LLM prompt to ground the response.",
+      "type": "semantic"
+    },
+    {
+      "id": 7,
+      "question": "What is BM25?",
+      "ground_truth": "BM25 is a probabilistic ranking function for information retrieval that extends TF-IDF with term-frequency saturation and document-length normalisation, handling exact keyword matches effectively.",
+      "type": "factual"
+    },
+    {
+      "id": 8,
+      "question": "How does cosine similarity work?",
+      "ground_truth": "Cosine similarity measures the cosine of the angle between two vectors; it equals the dot product divided by the product of their magnitudes, and is invariant to vector length.",
+      "type": "semantic"
+    },
+    {
+      "id": 9,
+      "question": "What is chunking in RAG?",
+      "ground_truth": "Chunking is the process of splitting documents into smaller pieces before indexing. Semantic chunking splits on drops in cosine similarity between adjacent sentence embeddings to preserve topical boundaries.",
+      "type": "factual"
+    },
+    {
+      "id": 10,
+      "question": "Explain embedding vectors.",
+      "ground_truth": "Embedding vectors are dense numerical representations of text produced by encoder models. Similar texts have embeddings that are close in vector space, enabling semantic search.",
+      "type": "semantic"
+    },
+    {
+      "id": 11,
+      "question": "What is semantic search?",
+      "ground_truth": "Semantic search retrieves documents based on meaning rather than exact keyword match, using embedding similarity to find conceptually related content.",
+      "type": "semantic"
+    },
+    {
+      "id": 12,
+      "question": "How does RRF work?",
+      "ground_truth": "Reciprocal Rank Fusion combines ranked lists by summing 1/(k + rank) for each document across all lists, where k=60 is a smoothing constant, without requiring score normalisation.",
+      "type": "semantic"
+    },
+    {
+      "id": 13,
+      "question": "What is a vector database?",
+      "ground_truth": "A vector database is a specialised database designed to store and query embedding vectors efficiently. Examples include Pinecone, Weaviate, Qdrant, and pgvector.",
+      "type": "factual"
+    },
+    {
+      "id": 14,
+      "question": "Explain LLM routing.",
+      "ground_truth": "LLM routing directs queries to different model sizes based on complexity: simple queries go to smaller, cheaper models while complex queries go to larger, more capable models.",
+      "type": "semantic"
+    },
+    {
+      "id": 15,
+      "question": "What is the token bucket rate limiting algorithm?",
+      "ground_truth": "The token bucket algorithm maintains a bucket that refills at a fixed rate; each request consumes one token, and requests are rejected when the bucket is empty.",
+      "type": "factual"
+    },
+    {
+      "id": 16,
+      "question": "What is idempotency?",
+      "ground_truth": "Idempotency ensures that performing the same operation multiple times has the same effect as performing it once. Idempotency keys deduplicate retried requests in distributed systems.",
+      "type": "factual"
+    },
+    {
+      "id": 17,
+      "question": "What is deep learning?",
+      "ground_truth": "Deep learning is a subset of machine learning that uses neural networks with many layers to learn hierarchical representations from data automatically.",
+      "type": "factual"
+    },
+    {
+      "id": 18,
+      "question": "Explain semantic caching.",
+      "ground_truth": "Semantic caching stores responses to previous queries and returns a cached response when a new query's embedding is sufficiently similar (cosine similarity above a threshold) to a cached query.",
+      "type": "semantic"
+    },
+    {
+      "id": 19,
+      "question": "What programming paradigms does Python support?",
+      "ground_truth": "Python supports multiple programming paradigms including object-oriented, functional, and procedural styles.",
+      "type": "factual"
+    },
+    {
+      "id": 20,
+      "question": "Why is RRF robust for combining dense and sparse retrieval?",
+      "ground_truth": "RRF is robust because it operates on rank positions rather than raw scores, avoiding the need to normalise incompatible score scales from dense and sparse retrieval systems.",
+      "type": "complex"
+    }
+  ]
+}

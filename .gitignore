@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.env
+.env.*
+*.faiss
+*.json.bak
+/tmp/
+
+# AI agent working files
+CLAUDE.md
+.claude/
+.cursor/
+.aider*
+.continue/
+.copilot/
+.codeium/
+.windsurf/

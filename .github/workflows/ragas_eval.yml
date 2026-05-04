@@ -1,0 +1,31 @@
+name: RAGAS Evaluation
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  evaluate:
+    name: RAG quality gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run RAGAS evaluation
+        run: python eval/ragas_eval.py
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          # Fail the build if faithfulness drops below this value.
+          # Override via repo/env secret to adjust the threshold.
+          RAGAS_THRESHOLD: "0.85"
