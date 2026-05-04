@@ -7,9 +7,33 @@ on:
     branches: ["**"]
 
 jobs:
+  test:
+    name: Unit Tests & Linting
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install flake8 pytest pytest-asyncio
+
+      - name: Run Flake8
+        run: flake8 api/ retrieval/ llm/ chunker/ --max-line-length=100 --ignore=E501,W503
+
+      - name: Run Pytest
+        run: pytest tests/ -v
+
   evaluate:
     name: RAG quality gate
     runs-on: ubuntu-latest
+    needs: [test]
 
     steps:
       - uses: actions/checkout@v4

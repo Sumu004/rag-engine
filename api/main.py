@@ -1,11 +1,19 @@
 """
 RAG Engine API - FastAPI endpoints for document query.
+
+Key improvements over previous version:
+  - Index persistence: FAISS index and metadata are saved to disk after
+    each ingest and reloaded on startup, so data survives restarts.
+  - Removed the naive dict cache from the API layer — caching is handled
+    by the LLMClient's semantic cache (embedding-similarity based).
+  - Uses the lifespan context manager instead of deprecated on_event.
 """
 
 import os
 import sys
 import json
 import hashlib
+from contextlib import asynccontextmanager
 from typing import List, Optional
 from dataclasses import dataclass
 
@@ -17,14 +25,9 @@ from chunker.semantic_chunker import SemanticChunker
 from retrieval.hybrid_retriever import HybridRetriever
 from llm.llm_router import LLMRouter, QueryClassifier
 
-app = FastAPI(
-    title="RAG Engine API",
-    description="Production-grade RAG with hybrid retrieval and LLM routing",
-    version="1.0.0"
-)
-
 DATA_DIR = os.environ.get('DATA_DIR', '/tmp/rag-data')
 INDEX_DIR = os.environ.get('INDEX_DIR', '/tmp/rag-index')
+INDEX_PATH = os.path.join(INDEX_DIR, 'rag_index')
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(INDEX_DIR, exist_ok=True)
@@ -34,18 +37,46 @@ retriever = HybridRetriever()
 router = LLMRouter()
 classifier = QueryClassifier()
 
-query_cache: dict = {}
 
-
-@app.on_event("startup")
-async def startup():
-    """Initialize services on startup."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup: load persisted index if available.  Shutdown: save."""
     print("RAG Engine starting...")
     print(f"  Chunker model: {chunker.model}")
     print(f"  Retriever: hybrid (FAISS + BM25)")
     print(f"  LLM: GROQ LLaMA-3")
-    
+
     chunker.model.to('cpu')
+
+    # Auto-load persisted index from a previous run.
+    if os.path.exists(f"{INDEX_PATH}.faiss"):
+        try:
+            retriever.load(INDEX_PATH)
+            stats = retriever.index_stats()
+            print(f"  Loaded persisted index: {stats['num_docs']} chunks, "
+                  f"FAISS ntotal={stats['faiss_ntotal']}")
+        except Exception as e:
+            print(f"  Warning: failed to load persisted index: {e}")
+    else:
+        print("  No persisted index found — starting empty.")
+
+    yield  # application runs
+
+    # Auto-save on shutdown.
+    if retriever.chunks:
+        try:
+            retriever.save(INDEX_PATH)
+            print(f"Index saved ({retriever.index_stats()['num_docs']} chunks).")
+        except Exception as e:
+            print(f"Warning: failed to save index on shutdown: {e}")
+
+
+app = FastAPI(
+    title="RAG Engine API",
+    description="Production-grade RAG with hybrid retrieval and LLM routing",
+    version="1.0.0",
+    lifespan=lifespan,
+)
 
 
 @app.get("/")
@@ -58,13 +89,17 @@ async def health():
     return {
         "status": "healthy",
         "index": retriever.index_stats(),
-        "cache_size": len(query_cache)
+        "cache_size": len(router.client.cache),
     }
 
 
 @app.post("/ingest")
 async def ingest_file(file: UploadFile = File(...)):
-    """Ingest a document (txt or pdf)."""
+    """Ingest a document (txt or pdf).
+
+    The index is persisted to disk after every ingest so data survives
+    server restarts.
+    """
     content = await file.read()
     text = content.decode('utf-8', errors='ignore')
     
@@ -77,12 +112,19 @@ async def ingest_file(file: UploadFile = File(...)):
         chunk['file_hash'] = file_hash
     
     retriever.add_documents(chunks)
+
+    # Persist to disk so the index survives restarts.
+    try:
+        retriever.save(INDEX_PATH)
+    except Exception as e:
+        print(f"Warning: failed to persist index after ingest: {e}")
     
     return {
         "status": "ingested",
         "filename": file.filename,
         "file_hash": file_hash,
-        "num_chunks": len(chunks)
+        "num_chunks": len(chunks),
+        "total_indexed": retriever.index_stats()['num_docs'],
     }
 
 
@@ -98,16 +140,11 @@ async def query(
     
     - question: The question to ask
     - k: Number of chunks to retrieve
-    - use_cache: Enable semantic cache
+    - use_cache: Enable semantic cache (handled by LLMClient)
     - auto_route: Auto-route to model size
     """
     if not question.strip():
         raise HTTPException(400, "Question cannot be empty")
-    
-    if use_cache:
-        cache_key = f"{question}:{k}"
-        if cache_key in query_cache:
-            return query_cache[cache_key]
     
     mode = classifier.classify(question) if auto_route else 'hybrid'
     
@@ -135,9 +172,6 @@ async def query(
         "latency_ms": llm_response.latency_ms
     }
     
-    if use_cache:
-        query_cache[cache_key] = response
-    
     return response
 
 
@@ -147,14 +181,15 @@ async def stats():
     return {
         "index": retriever.index_stats(),
         "router": router.get_stats(),
-        "cache_size": len(query_cache)
+        "cache_size": len(router.client.cache),
     }
 
 
 @app.post("/clear-cache")
 async def clear_cache():
-    """Clear query cache."""
-    query_cache.clear()
+    """Clear the LLM semantic cache."""
+    router.client._cache_embeddings.clear()
+    router.client._cache_responses.clear()
     return {"status": "cleared", "size": 0}
 
 

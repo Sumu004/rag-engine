@@ -1,6 +1,13 @@
 """
 Semantic Chunker - Splits documents by cosine similarity between sentence embeddings.
-Unlike fixed-token chunking, this preserves semantic boundaries.
+
+Key design decisions:
+  - Splits on drops in cosine similarity rather than fixed token counts,
+    preserving topical boundaries.
+  - Configurable sentence overlap between adjacent chunks so context isn't
+    lost at chunk boundaries (default: 2 sentences).
+  - Structural patterns (headings, code blocks, tables) force a split
+    regardless of similarity, preventing mixed-type chunks.
 """
 
 import os
@@ -20,6 +27,7 @@ STRUCTURAL_PATTERNS = [
 ]
 
 SIMILARITY_THRESHOLD = float(os.environ.get('CHUNK_SIMILARITY_THRESHOLD', '0.85'))
+DEFAULT_OVERLAP = int(os.environ.get('CHUNK_OVERLAP_SENTENCES', '2'))
 
 
 class SemanticChunker:
@@ -39,15 +47,25 @@ class SemanticChunker:
         sentences = re.split(r'(?<=[.!?])\s+', text)
         return [s.strip() for s in sentences if s.strip()]
     
-    def chunk(self, text: str, min_sentences: int = 1, max_sentences: int = 10) -> List[Dict]:
+    def chunk(self, text: str, min_sentences: int = 1, max_sentences: int = 10,
+              overlap_sentences: int = DEFAULT_OVERLAP) -> List[Dict]:
         """
-        Chunk text by semantic similarity.
+        Chunk text by semantic similarity with configurable overlap.
         
+        Args:
+            text: The document text to chunk.
+            min_sentences: Minimum sentences per chunk.
+            max_sentences: Maximum sentences per chunk.
+            overlap_sentences: Number of trailing sentences from the
+                previous chunk to prepend to the next chunk.  This
+                ensures context isn't lost at chunk boundaries.
+
         Returns list of chunks with metadata:
         - text: chunk content
         - start_idx: character start position
         - end_idx: character end position
         - num_sentences: number of sentences in chunk
+        - has_overlap: whether overlap was applied
         """
         if not text or not text.strip():
             return []
@@ -61,67 +79,72 @@ class SemanticChunker:
                 'text': text,
                 'start_idx': 0,
                 'end_idx': len(text),
-                'num_sentences': 1
+                'num_sentences': 1,
+                'has_overlap': False,
             }]
         
         embeddings = self.model.encode(sentences, convert_to_numpy=True)
         
-        chunks = []
+        # --- Phase 1: identify raw (non-overlapping) chunk boundaries ------
+        raw_chunks: List[List[int]] = []   # each item is a list of sentence indices
         current_chunk = [0]
-        current_start = 0
         
         for i in range(1, len(sentences)):
-            if i >= len(sentences):
-                break
-            
             sim = self._cosine_similarity(embeddings[i-1], embeddings[i])
             
             structural_prev = self.is_structural(sentences[i-1])
             structural_curr = self.is_structural(sentences[i])
             
+            should_split = False
             if structural_prev != structural_curr:
-                if len(current_chunk) >= min_sentences:
-                    chunk_data = self._build_chunk(sentences, embeddings, current_chunk, current_start, i)
-                    chunks.append(chunk_data)
-                current_chunk = [i]
-                current_start = i
+                should_split = True
             elif sim < SIMILARITY_THRESHOLD:
-                if len(current_chunk) >= min_sentences:
-                    chunk_data = self._build_chunk(sentences, embeddings, current_chunk, current_start, i)
-                    chunks.append(chunk_data)
-                current_chunk = [i]
-                current_start = i
+                should_split = True
             elif len(current_chunk) >= max_sentences:
-                chunk_data = self._build_chunk(sentences, embeddings, current_chunk, current_start, i)
-                chunks.append(chunk_data)
+                should_split = True
+            
+            if should_split and len(current_chunk) >= min_sentences:
+                raw_chunks.append(current_chunk)
                 current_chunk = [i]
-                current_start = i
             else:
                 current_chunk.append(i)
         
         if current_chunk:
-            chunk_data = self._build_chunk(sentences, embeddings, current_chunk, current_start, len(sentences))
-            chunks.append(chunk_data)
+            raw_chunks.append(current_chunk)
         
-        return chunks
-    
-    def _build_chunk(self, sentences: List[str], embeddings: np.ndarray, indices: List[int], 
-                  start: int, end: int) -> Dict:
-        """Build chunk from sentence indices."""
-        chunk_text = ' '.join(sentences[i] for i in indices)
-        chunk_embeddings = embeddings[indices]
-        avg_embedding = np.mean(chunk_embeddings, axis=0)
+        # --- Phase 2: add overlap between adjacent chunks -------------------
+        final_chunks = []
+        for chunk_idx, indices in enumerate(raw_chunks):
+            chunk_sentences = [sentences[i] for i in indices]
+            has_overlap = False
+
+            if chunk_idx > 0 and overlap_sentences > 0:
+                prev_indices = raw_chunks[chunk_idx - 1]
+                overlap_indices = prev_indices[-overlap_sentences:]
+                overlap_sents = [sentences[i] for i in overlap_indices]
+                chunk_sentences = overlap_sents + chunk_sentences
+                has_overlap = True
+
+            chunk_text = ' '.join(chunk_sentences)
+
+            # Compute average embedding from the *original* sentence indices
+            # (overlap sentences are context, not the chunk's core content).
+            chunk_embeddings = embeddings[indices]
+            avg_embedding = np.mean(chunk_embeddings, axis=0)
+
+            start_pos = sum(len(sentences[j]) + 1 for j in range(indices[0]))
+            end_pos = start_pos + len(chunk_text)
+
+            final_chunks.append({
+                'text': chunk_text,
+                'start_idx': start_pos,
+                'end_idx': end_pos,
+                'num_sentences': len(chunk_sentences),
+                'has_overlap': has_overlap,
+                'embedding': avg_embedding,
+            })
         
-        start_pos = sum(len(sentences[i]) + 1 for i in range(start, min(indices)))
-        end_pos = start_pos + len(chunk_text)
-        
-        return {
-            'text': chunk_text,
-            'start_idx': start_pos,
-            'end_idx': end_pos,
-            'num_sentences': len(indices),
-            'embedding': avg_embedding
-        }
+        return final_chunks
     
     @staticmethod
     def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -180,5 +203,6 @@ if __name__ == '__main__':
     print(f"Input: {len(sample_text)} chars, {len(sample_text.split())} words")
     print(f"Output: {len(chunks)} chunks")
     for i, chunk in enumerate(chunks):
-        print(f"\n[Chunk {i+1}] ({chunk['num_sentences']} sentences)")
+        overlap = " [+overlap]" if chunk.get('has_overlap') else ""
+        print(f"\n[Chunk {i+1}] ({chunk['num_sentences']} sentences{overlap})")
         print(f"  {chunk['text'][:100]}...")

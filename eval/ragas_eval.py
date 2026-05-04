@@ -42,6 +42,23 @@ Answer:
 Is the answer grounded in and supported by the context above?
 Respond with a single decimal number between 0.0 (not faithful) and 1.0 (fully faithful). No explanation."""
 
+RELEVANCY_PROMPT = """\
+Given the question and the retrieved contexts, rate how relevant the contexts are
+to answering the question.
+
+Question: {question}
+Contexts: {context}
+
+Score 0.0 to 1.0. Respond with a single decimal number only."""
+
+CORRECTNESS_PROMPT = """\
+Compare the generated answer to the ground truth. Rate how factually correct the generated answer is.
+
+Ground Truth: {ground_truth}
+Generated Answer: {answer}
+
+Score 0.0 to 1.0. Respond with a single decimal number only."""
+
 
 # ---------------------------------------------------------------------------
 # Pipeline
@@ -107,27 +124,47 @@ def _groq_chat(prompt: str, retries: int = 4) -> str:
 
 def evaluate_with_llm_judge(records: List[Dict]) -> Dict:
     """
-    LLM-judge faithfulness: ask GROQ to score each answer 0–1 against its contexts.
-    Rate-limit: 0.5s between requests to stay within GROQ free-tier limits.
+    LLM-judge faithfulness, relevancy, and correctness.
+    Rate-limit: 0.5s between requests.
     """
-    scores = []
+    metrics = {"faithfulness": [], "relevancy": [], "correctness": []}
+
     for r in records:
         context = "\n\n".join(r["contexts"][:3])
-        prompt = FAITHFULNESS_PROMPT.format(context=context, answer=r["answer"])
+        
+        # Faithfulness
+        prompt_f = FAITHFULNESS_PROMPT.format(context=context, answer=r["answer"])
         try:
-            content = _groq_chat(prompt)
-            score = float(content.split()[0])
-            scores.append(min(1.0, max(0.0, score)))
-        except Exception as e:
-            print(f"  [warn] Judge failed for '{r['question'][:40]}': {e}", file=sys.stderr)
-            scores.append(0.5)
-        time.sleep(2.0)
+            score = float(_groq_chat(prompt_f).split()[0])
+            metrics["faithfulness"].append(min(1.0, max(0.0, score)))
+        except Exception:
+            metrics["faithfulness"].append(0.5)
+        time.sleep(0.5)
+        
+        # Relevancy
+        prompt_r = RELEVANCY_PROMPT.format(question=r["question"], context=context)
+        try:
+            score = float(_groq_chat(prompt_r).split()[0])
+            metrics["relevancy"].append(min(1.0, max(0.0, score)))
+        except Exception:
+            metrics["relevancy"].append(0.5)
+        time.sleep(0.5)
+        
+        # Correctness
+        prompt_c = CORRECTNESS_PROMPT.format(ground_truth=r.get("ground_truth", ""), answer=r["answer"])
+        try:
+            score = float(_groq_chat(prompt_c).split()[0])
+            metrics["correctness"].append(min(1.0, max(0.0, score)))
+        except Exception:
+            metrics["correctness"].append(0.5)
+        time.sleep(0.5)
 
-    avg = sum(scores) / len(scores) if scores else 0.0
     return {
-        "faithfulness": avg,
+        "faithfulness": sum(metrics["faithfulness"]) / len(metrics["faithfulness"]) if metrics["faithfulness"] else 0.0,
+        "relevancy": sum(metrics["relevancy"]) / len(metrics["relevancy"]) if metrics["relevancy"] else 0.0,
+        "correctness": sum(metrics["correctness"]) / len(metrics["correctness"]) if metrics["correctness"] else 0.0,
         "evaluator": "llm-judge-groq",
-        "num_evaluated": len(scores),
+        "num_evaluated": len(records),
     }
 
 
@@ -140,7 +177,13 @@ def evaluate_heuristic(records: List[Dict]) -> Dict:
         overlap = len(answer_words & context_words) / len(answer_words) if answer_words else 0.0
         scores.append(overlap)
     avg = sum(scores) / len(scores) if scores else 0.0
-    return {"faithfulness": avg, "evaluator": "heuristic", "num_evaluated": len(scores)}
+    return {
+        "faithfulness": avg,
+        "relevancy": avg,
+        "correctness": avg,
+        "evaluator": "heuristic",
+        "num_evaluated": len(scores)
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -188,16 +231,21 @@ def main() -> int:
 
     print(f"\nResults (evaluator: {scores['evaluator']}):")
     print(f"  Faithfulness:  {scores['faithfulness']:.3f}")
+    print(f"  Relevancy:     {scores['relevancy']:.3f}")
+    print(f"  Correctness:   {scores['correctness']:.3f}")
     print(f"  Threshold:     {FAITHFULNESS_THRESHOLD:.3f}")
     print(f"  Questions:     {scores['num_evaluated']}")
 
-    passed = scores["faithfulness"] >= FAITHFULNESS_THRESHOLD
+    passed = (
+        scores["faithfulness"] >= FAITHFULNESS_THRESHOLD and
+        scores["relevancy"] >= FAITHFULNESS_THRESHOLD and
+        scores["correctness"] >= FAITHFULNESS_THRESHOLD
+    )
     print(f"  Gate:          {'PASSED ✓' if passed else 'FAILED ✗'}")
 
     if not passed:
         print(
-            f"\n[error] Faithfulness {scores['faithfulness']:.3f} < threshold "
-            f"{FAITHFULNESS_THRESHOLD:.3f}. Build failed.",
+            f"\n[error] One or more metrics < threshold {FAITHFULNESS_THRESHOLD:.3f}. Build failed.",
             file=sys.stderr,
         )
         return 1

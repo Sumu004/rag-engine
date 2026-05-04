@@ -1,5 +1,16 @@
 """
 Hybrid Retrieval - Combines FAISS (dense) + BM25 (sparse) with Reciprocal Rank Fusion.
+
+Key design decisions:
+  - Incremental indexing: add_documents() appends to the existing corpus
+    rather than replacing it, so ingesting a second file doesn't erase the
+    first.
+  - FAISS index is extended in-place via index.add(); BM25 must be rebuilt
+    on the full corpus because BM25Okapi needs global IDF statistics.
+  - save()/load() persist the FAISS index and a JSON sidecar containing
+    the raw chunk texts and metadata.  The SentenceTransformer object is
+    stored by *name* (not serialised), avoiding the JSON crash present in
+    the previous version.
 """
 
 import os
@@ -16,6 +27,7 @@ RRF_K = 60
 
 class HybridRetriever:
     def __init__(self, embed_model: str = 'all-MiniLM-L6-v2'):
+        self.embed_model_name: str = embed_model
         self.embed_model = SentenceTransformer(embed_model)
         self.embed_dim = self.embed_model.get_sentence_embedding_dimension()
         
@@ -26,20 +38,42 @@ class HybridRetriever:
         self.doc_ids: List[str] = []
     
     def add_documents(self, chunks: List[Dict]):
-        """Add chunked documents to the index."""
-        self.chunks = [c['text'] for c in chunks]
-        self.chunk_metadata = [c for c in chunks]
-        self.doc_ids = [str(i) for i in range(len(chunks))]
-        
-        if not self.chunks:
+        """Add chunked documents to the index *incrementally*.
+
+        Unlike the previous implementation which replaced the entire
+        corpus on every call, this version appends new chunks to the
+        existing lists, encodes only the new embeddings, and extends
+        the FAISS index in-place.
+
+        BM25 must still be rebuilt from scratch because BM25Okapi
+        computes global IDF statistics that change when the corpus
+        grows.
+        """
+        if not chunks:
             return
-        
-        embeddings = self.embed_model.encode(self.chunks, convert_to_numpy=True)
-        embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-        
-        self.faiss_index = faiss.IndexFlatIP(self.embed_dim)
+
+        new_texts = [c['text'] for c in chunks]
+
+        # Assign IDs that continue from the current corpus size.
+        start_id = len(self.chunks)
+        new_ids = [str(start_id + i) for i in range(len(chunks))]
+
+        # Append to the running corpus.
+        self.chunks.extend(new_texts)
+        self.chunk_metadata.extend(chunks)
+        self.doc_ids.extend(new_ids)
+
+        # --- Dense index (FAISS) — encode only new chunks -----------------
+        embeddings = self.embed_model.encode(new_texts, convert_to_numpy=True)
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        norms[norms == 0] = 1  # avoid division by zero
+        embeddings = embeddings / norms
+
+        if self.faiss_index is None:
+            self.faiss_index = faiss.IndexFlatIP(self.embed_dim)
         self.faiss_index.add(embeddings.astype('float32'))
-        
+
+        # --- Sparse index (BM25) — must rebuild for correct IDF -----------
         tokenized = [chunk.split() for chunk in self.chunks]
         self.bm25 = BM25Okapi(tokenized)
     
@@ -160,24 +194,45 @@ class HybridRetriever:
             'num_docs': len(self.chunks),
             'embedding_dim': self.embed_dim,
             'faiss_type': 'FlatIP',
-            'bm25_type': 'Okapi'
+            'bm25_type': 'Okapi',
+            'faiss_ntotal': self.faiss_index.ntotal if self.faiss_index else 0,
         }
     
     def save(self, index_path: str):
-        """Save index to disk."""
+        """Save index to disk.
+
+        Persists the FAISS binary index and a JSON sidecar containing
+        the raw chunk texts, metadata, and doc IDs.  The embedding
+        model is stored by *name* so that load() can re-instantiate it
+        without trying to serialise a PyTorch model to JSON.
+
+        Numpy arrays in chunk_metadata (e.g. pre-computed embeddings)
+        are stripped because they are not JSON-serialisable and can be
+        recomputed from the text.
+        """
+        os.makedirs(os.path.dirname(index_path) or '.', exist_ok=True)
+
         if self.faiss_index:
             faiss.write_index(self.faiss_index, f"{index_path}.faiss")
         
+        # Strip numpy arrays from metadata before serialising.
+        clean_metadata = []
+        for m in self.chunk_metadata:
+            clean_metadata.append({
+                k: v for k, v in m.items()
+                if not isinstance(v, np.ndarray)
+            })
+
         with open(f"{index_path}.json", 'w') as f:
             json.dump({
                 'chunks': self.chunks,
-                'metadata': self.chunk_metadata,
+                'metadata': clean_metadata,
                 'doc_ids': self.doc_ids,
-                'embed_model': self.embed_model
+                'embed_model_name': self.embed_model_name,
             }, f)
     
     def load(self, index_path: str):
-        """Load index from disk."""
+        """Load index from disk and rebuild BM25."""
         self.faiss_index = faiss.read_index(f"{index_path}.faiss")
         
         with open(f"{index_path}.json", 'r') as f:
@@ -185,6 +240,11 @@ class HybridRetriever:
             self.chunks = data['chunks']
             self.chunk_metadata = data['metadata']
             self.doc_ids = data['doc_ids']
+
+        # Rebuild BM25 from the loaded corpus.
+        if self.chunks:
+            tokenized = [chunk.split() for chunk in self.chunks]
+            self.bm25 = BM25Okapi(tokenized)
 
 
 def create_retriever(chunks: List[Dict]) -> HybridRetriever:
@@ -208,6 +268,13 @@ if __name__ == '__main__':
     
     print(f"Index: {retriever.index_stats()}")
     
+    # Incremental add — should NOT erase the first batch.
+    retriever.add_documents([
+        {'text': 'Reinforcement learning trains agents via rewards.', 'source': 'doc6'},
+    ])
+    assert retriever.index_stats()['num_docs'] == 6, "Incremental add failed!"
+    print(f"After incremental add: {retriever.index_stats()}")
+
     tests = [
         ("What is Python?", 'sparse'),
         ("Explain machine learning", 'dense'),
@@ -223,3 +290,4 @@ if __name__ == '__main__':
         print(f"  Results: {len(results)}")
         for r in results[:2]:
             print(f"    [{r['rank']}] {r['text'][:50]}... (score: {r['score']:.3f})")
+"""
