@@ -10,15 +10,10 @@ Key improvements over previous version:
 """
 
 import os
-import sys
-import json
 import hashlib
 from contextlib import asynccontextmanager
-from typing import List, Optional
-from dataclasses import dataclass
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse
 import uvicorn
 
 from chunker.semantic_chunker import SemanticChunker

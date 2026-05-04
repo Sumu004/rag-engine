@@ -12,11 +12,10 @@ Key improvements:
 """
 
 import os
-import json
 import time
 from collections import OrderedDict
 from typing import List, Dict, Optional, Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
 import numpy as np

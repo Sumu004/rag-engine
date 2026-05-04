@@ -12,7 +12,7 @@ Key design decisions:
 
 import os
 import re
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Optional
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
@@ -90,9 +90,9 @@ class SemanticChunker:
         current_chunk = [0]
         
         for i in range(1, len(sentences)):
-            sim = self._cosine_similarity(embeddings[i-1], embeddings[i])
+            sim = self._cosine_similarity(embeddings[i - 1], embeddings[i])
             
-            structural_prev = self.is_structural(sentences[i-1])
+            structural_prev = self.is_structural(sentences[i - 1])
             structural_curr = self.is_structural(sentences[i])
             
             should_split = False

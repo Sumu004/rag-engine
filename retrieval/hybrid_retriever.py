@@ -290,4 +290,3 @@ if __name__ == '__main__':
         print(f"  Results: {len(results)}")
         for r in results[:2]:
             print(f"    [{r['rank']}] {r['text'][:50]}... (score: {r['score']:.3f})")
-"""
