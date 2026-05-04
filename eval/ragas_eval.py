@@ -34,7 +34,7 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 try:
     from datasets import Dataset
     from ragas import evaluate as ragas_evaluate
-    from ragas.metrics import faithfulness, answer_relevancy, context_precision
+    from ragas.metrics.collections import faithfulness, answer_relevancy, context_precision
     RAGAS_AVAILABLE = True
 except ImportError:
     RAGAS_AVAILABLE = False
@@ -42,26 +42,24 @@ except ImportError:
 RAGAS_LLM_CONFIGURED = False
 if RAGAS_AVAILABLE and GROQ_API_KEY:
     try:
-        from langchain_openai import ChatOpenAI
-        from ragas.llms import LangchainLLMWrapper
-        from ragas.embeddings import LangchainEmbeddingsWrapper
-        from langchain_openai import OpenAIEmbeddings
+        from openai import OpenAI as _OpenAI
+        from ragas.llms import llm_factory
+        from ragas.embeddings import HuggingFaceEmbeddings as _RagasHFEmbeddings
 
-        _groq_chat = ChatOpenAI(
-            model="llama-3-8b-8192",
+        # GROQ as LLM judge via OpenAI-compatible API
+        _groq_client = _OpenAI(
             api_key=GROQ_API_KEY,
             base_url="https://api.groq.com/openai/v1",
         )
-        _groq_embeddings = OpenAIEmbeddings(
-            model="text-embedding-3-small",
-            api_key=GROQ_API_KEY,
-            base_url="https://api.groq.com/openai/v1",
-        )
-        _ragas_llm = LangchainLLMWrapper(_groq_chat)
-        _ragas_embeddings = LangchainEmbeddingsWrapper(_groq_embeddings)
+        _ragas_llm = llm_factory("llama-3-8b-8192", client=_groq_client)
+
+        # HuggingFace embeddings locally — GROQ does not serve embeddings
+        _ragas_embeddings = _RagasHFEmbeddings()
 
         for metric in (faithfulness, answer_relevancy, context_precision):
             metric.llm = _ragas_llm
+        # answer_relevancy uses embeddings to score semantic similarity
+        answer_relevancy.embeddings = _ragas_embeddings
 
         RAGAS_LLM_CONFIGURED = True
     except Exception as e:
