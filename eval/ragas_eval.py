@@ -79,21 +79,30 @@ def run_question(question: str, retriever: HybridRetriever, router: LLMRouter, k
 # Evaluation
 # ---------------------------------------------------------------------------
 
-def _groq_chat(prompt: str) -> str:
-    """Single GROQ completion, returns content string."""
-    resp = requests.post(
-        f"{GROQ_BASE_URL}/chat/completions",
-        headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-        json={
-            "model": JUDGE_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.0,
-            "max_tokens": 10,
-        },
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"].strip()
+def _groq_chat(prompt: str, retries: int = 4) -> str:
+    """Single GROQ completion with exponential backoff on 429."""
+    delay = 2.0
+    for attempt in range(retries):
+        resp = requests.post(
+            f"{GROQ_BASE_URL}/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": JUDGE_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.0,
+                "max_tokens": 10,
+            },
+            timeout=30,
+        )
+        if resp.status_code == 429:
+            wait = delay * (2 ** attempt)
+            print(f"  [rate-limit] 429 — retrying in {wait:.0f}s (attempt {attempt + 1}/{retries})", file=sys.stderr)
+            time.sleep(wait)
+            continue
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    resp.raise_for_status()  # raise after exhausting retries
+    return ""  # unreachable
 
 
 def evaluate_with_llm_judge(records: List[Dict]) -> Dict:
@@ -112,7 +121,7 @@ def evaluate_with_llm_judge(records: List[Dict]) -> Dict:
         except Exception as e:
             print(f"  [warn] Judge failed for '{r['question'][:40]}': {e}", file=sys.stderr)
             scores.append(0.5)
-        time.sleep(0.5)
+        time.sleep(2.0)
 
     avg = sum(scores) / len(scores) if scores else 0.0
     return {
