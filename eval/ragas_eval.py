@@ -54,7 +54,7 @@ if RAGAS_AVAILABLE and GROQ_API_KEY:
         _ragas_llm = llm_factory("llama-3-8b-8192", client=_groq_client)
 
         # HuggingFace embeddings locally — GROQ does not serve embeddings
-        _ragas_embeddings = _RagasHFEmbeddings()
+        _ragas_embeddings = _RagasHFEmbeddings(model="sentence-transformers/all-MiniLM-L6-v2")
 
         for metric in (faithfulness, answer_relevancy, context_precision):
             metric.llm = _ragas_llm
@@ -192,7 +192,7 @@ def main() -> int:
         scores = evaluate_with_ragas(records)
     else:
         if RAGAS_AVAILABLE and not RAGAS_LLM_CONFIGURED:
-            print("[warn] GROQ_API_KEY not set — using heuristic evaluator", file=sys.stderr)
+            print("[warn] RAGAS LLM not configured (check GROQ_API_KEY) — using heuristic evaluator", file=sys.stderr)
         elif not RAGAS_AVAILABLE:
             print("[warn] ragas not installed — using heuristic evaluator", file=sys.stderr)
         scores = evaluate_heuristic(records)
