@@ -20,8 +20,8 @@ ModelSize = Enum('ModelSize', 'SMALL LARGE')
 
 
 LLM_MODELS = {
-    'small': 'llama-3-8b-8192',
-    'large': 'llama-3-70b-8192',
+    'small': 'llama-3.1-8b-instant',
+    'large': 'llama-3.3-70b-versatile',
 }
 
 

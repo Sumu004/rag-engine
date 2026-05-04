@@ -34,7 +34,7 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 try:
     from datasets import Dataset
     from ragas import evaluate as ragas_evaluate
-    from ragas.metrics import Faithfulness, AnswerRelevancy, ContextPrecision
+    from ragas.metrics.collections import Faithfulness, AnswerRelevancy, ContextPrecision
     RAGAS_AVAILABLE = True
 except ImportError:
     RAGAS_AVAILABLE = False
@@ -54,7 +54,7 @@ if RAGAS_AVAILABLE and GROQ_API_KEY:
             api_key=GROQ_API_KEY,
             base_url="https://api.groq.com/openai/v1",
         )
-        _ragas_llm = llm_factory("llama-3-8b-8192", client=_groq_client)
+        _ragas_llm = llm_factory("llama-3.1-8b-instant", client=_groq_client)
 
         # HuggingFace embeddings locally — GROQ does not serve embeddings
         _ragas_embeddings = _RagasHFEmbeddings(model="sentence-transformers/all-MiniLM-L6-v2")
@@ -125,12 +125,11 @@ def evaluate_with_ragas(records: List[Dict]) -> Dict:
         for r in records
     ])
     result = ragas_evaluate(ds, metrics=_ragas_metrics)
-    # Result keys are the metric's .name attribute (e.g. "faithfulness")
-    scores = dict(result)
+    df = result.to_pandas()
     return {
-        "faithfulness": float(scores.get("faithfulness", 0.0)),
-        "answer_relevancy": float(scores.get("answer_relevancy", 0.0)),
-        "context_precision": float(scores.get("context_precision", 0.0)),
+        "faithfulness": float(df["faithfulness"].mean()),
+        "answer_relevancy": float(df["answer_relevancy"].mean()),
+        "context_precision": float(df["context_precision"].mean()),
         "evaluator": "ragas",
     }
 
